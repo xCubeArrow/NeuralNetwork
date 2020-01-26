@@ -1,27 +1,92 @@
 import random
+import _thread
+import threading
+import copy
 
 import numpy as np
+import json
+
 
 # The default activation function that the neural network uses, as lambdas
-sigmoid = lambda x: x / (1 + abs(x))
-d_sigmoid = lambda x: 1 / (1 + pow(abs(x), 2))
+
+
+class Thread (threading.Thread):
+    def __init__(self, nn, inputs, targets, iterations):
+        threading.Thread.__init__(self)
+        self.nn = nn
+        self.inputs = inputs
+        self.targets = targets
+        self.weights = []
+        self.biases = []
+        self.iterations = iterations
+
+    def run(self):
+        self.nn.train(self.inputs, self.targets, self.iterations)
+        self.weights = self.nn.weights
+        self.biases = self.nn.biases
+
+
+def sigmoid(x): return x / (1 + abs(x))
+
+
+def d_sigmoid(x): return 1 / (1 + pow(abs(x), 2))
+
+
+# The ReLu activation function and it's derivative as lambdas
+def relu(x): return np.maximum(0, x)
+
+
+def d_relu(x): return 1. * (x > 0)
+
+
+activation_dir = {
+    "sigmoid": sigmoid,
+    "d_sigmoid": d_sigmoid,
+
+    "relu": relu,
+    "d_relu": d_relu
+}
 
 
 class Main:
     # Initialize the neural network with all of the required variables
-    def __init__(self, layers, learning_rate=.1, activation_function=sigmoid, d_activation_function=d_sigmoid):
+    def __init__(self, layers, learning_rate=.1, activation_function=sigmoid, d_activation_function=d_sigmoid,
+                 weights=None, biases=None):
         self.learning_rate = learning_rate
-        self.weights = []
-        self.biases = []
         self.activation_function = activation_function
         self.d_activation_function = d_activation_function
-        self.net = [None] * (len(layers) - 1)
-        self.out = [None] * (len(layers) - 1)
+        self.cost = 99
 
-        # Make both the weights and the biases random
-        for i in range(1, len(layers)):
-            self.weights.append(np.random.rand(layers[i - 1], layers[i]))
-            self.biases.append(np.random.rand(1, layers[i]))
+        if weights is not None:
+            self.weights = weights
+            self.biases = biases
+        else:
+            # Make both the weights and the biases random
+            self.weights = []
+            self.biases = []
+            for i in range(1, len(layers)):
+                self.weights.append(np.random.rand(layers[i - 1], layers[i]))
+                self.biases.append(np.random.rand(1, layers[i]))
+        self.net = [None] * (len(self.weights))
+        self.out = [None] * (len(self.weights))
+
+    @staticmethod
+    def from_file(location: str):
+        with open(location) as file:
+            json_nn = json.loads(file.read())
+            learning_rate = json_nn["learning_rate"]
+            activation_function = activation_dir[json_nn["activation_function"]]
+            d_activation_function = activation_dir[json_nn["d_activation_function"]]
+
+            weights = []
+            biases = []
+            for obj in json_nn["layers"]:
+                weights.append(np.asarray(obj["weights"]))
+                biases.append(np.asarray(obj["biases"]))
+            file.close()
+
+            return Main(None, learning_rate=learning_rate, activation_function=activation_function,
+                        d_activation_function=d_activation_function, weights=weights, biases=biases)
 
     # Feeds forward the inputs through the neural network
     def feed_forward(self, inputs):
@@ -65,6 +130,30 @@ class Main:
             self.feed_forward(inputs[i])
             self.backward_propagation(targets[i], inputs[i])
 
+    def train_with_threads(self, inputs, targets, iterations=500000, n_threads=5):
+        threads = []
+        for i in range(n_threads):
+            thread = Thread(copy.copy(self), inputs, targets, iterations)
+            thread.start()
+            threads.append(thread)
+
+        for thread in threads:
+            thread.join()
+
+        weights = threads[0].weights
+        biases = threads[0].biases
+        for thread in threads[1:]:
+            for i in range(len(weights)):
+                weights[i] = np.add(weights[i], thread.weights[i])
+                biases[i] = np.add(biases[i], thread.biases[i])
+
+        for i in range(len(weights)):
+            weights[i] = weights[i] / n_threads
+            biases[i] = biases[i] / n_threads
+
+        self.weights = weights
+        self.biases = biases
+
     # Tests the neuronal network using the cost function. Prints out the results
     def test(self, inputs, target):
         loss = []
@@ -75,21 +164,52 @@ class Main:
             loss.append(np.mean(cost(self.out[-1], target)))
         print("Outputs:", out)
         print("Average Loss:", np.average(loss))
+        self.cost = np.average(loss)
+
+    def save_nn(self, location):
+        file = open(location, "w")
+
+        starting = [
+            '"learning_rate": ' + str(self.learning_rate),
+            '"activation_function": "' + self.activation_function.__name__ + '"',
+            '"d_activation_function": "' + self.d_activation_function.__name__ + '"'
+        ]
+
+        result = []
+        for i in range(len(self.weights)):
+            weight = '"weights": ' + json.dumps(self.weights[i].tolist())
+            biases = '"biases": ' + json.dumps(self.biases[i].tolist())
+            result.append(json.loads("{" + weight + ", " + biases + "}"))
+
+        file.write("{" + ", ".join(starting) + ', "layers":' + json.dumps(result) + "}")
+        file.close()
+
 
 # Calculates the loss of the outputs using the squared loss function
 def cost(out, target):
     return 1 / 2 * (np.subtract(target, out) ** 2)
+
 
 # The derivative of the cost function
 def d_cost(out, target):
     return np.subtract(target, out)
 
 
-# The ReLu activation function and it's derivative as lambdas
-relu = lambda x: np.maximum(0, x)
-d_relu = lambda x: 1. * (x > 0)
+nn = Main(layers=[2, 2, 1], activation_function=relu, d_activation_function=d_relu)
+inputs = [[0, 0], [1, 0], [0, 1], [1, 1]]
+targets = [[0], [1], [1], [0]]
+#with open("divorce.csv", "r") as file:
+#    data = file.read()
+#    for line in data.split("\n"):
+#        inputs.append(np.array(line.split(";")[:-1]).astype(np.double).tolist())
+#        targets.append(np.array(line.split(";")[-1]).astype(np.double).tolist())
 
-nn = Main([2, 2, 1], activation_function=relu, d_activation_function=d_relu)
+iteration = 1
+while nn.cost > .1:
+    _thread.start_new_thread(nn.train, (inputs, targets))
+    nn.train_with_threads(inputs, targets, 50000, 5)
+    nn.test(inputs, targets)
+    print(iteration)
+    iteration += 1
 
-nn.train([[0, 0], [0, 1], [1, 0], [1, 1]], [[0], [1], [1], [0]], 100000)
-nn.test([[0, 0], [0, 1], [1, 0], [1, 1]], [[0], [1], [1], [0]])
+nn.save_nn("nn.json")
