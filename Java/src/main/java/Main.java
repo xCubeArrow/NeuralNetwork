@@ -21,7 +21,7 @@ public class Main {
         nn.setLearningRate(0.1f);
 
         try {
-            nn.trainThreads(inputs, targets, 200000, 6);
+            nn.trainThreads(inputs, targets, 10000, 6);
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
