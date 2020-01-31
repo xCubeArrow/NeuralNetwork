@@ -1,8 +1,10 @@
+import org.nd4j.linalg.factory.Nd4j;
+
 public class Main {
 
 
     public static void main(String[] args) {
-        int[] layers = {2, 5, 5, 1};
+        int[] layers = {2, 2, 1};
         float[][][] inputs = {{{0, 0}},
                 {{0, 1}},
                 {{1, 0}},
@@ -13,13 +15,16 @@ public class Main {
                 {{0}}
         };
 
-
         NeuralNetwork nn = new NeuralNetwork(layers);
         nn.setActivationFunction(NeuralNetwork::sigmoid);
         nn.setdActivationFunction(NeuralNetwork::dSigmoid);
         nn.setLearningRate(0.1f);
 
-        nn.train(inputs, targets, 2100000000);
+        try {
+            nn.trainThreads(inputs, targets, 200000, 6);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
         nn.test(inputs);
 
     }

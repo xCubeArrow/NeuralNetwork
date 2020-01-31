@@ -1,29 +1,20 @@
-import random
-import _thread
-import threading
 import copy
+import json
+from multiprocessing.pool import ThreadPool
+import multiprocessing
+import random
+import threading
 
 import numpy as np
-import json
 
 
 # The default activation function that the neural network uses, as lambdas
 
 
-class Thread (threading.Thread):
-    def __init__(self, nn, inputs, targets, iterations):
-        threading.Thread.__init__(self)
-        self.nn = nn
-        self.inputs = inputs
-        self.targets = targets
-        self.weights = []
-        self.biases = []
-        self.iterations = iterations
-
-    def run(self):
-        self.nn.train(self.inputs, self.targets, self.iterations)
-        self.weights = self.nn.weights
-        self.biases = self.nn.biases
+def thread_train(neural_network, inputs, targets, iterations):
+    nn = copy.copy(neural_network)
+    nn.train(inputs, targets, round(iterations))
+    return [nn.weights, nn.biases]
 
 
 def sigmoid(x): return x / (1 + abs(x))
@@ -130,30 +121,6 @@ class Main:
             self.feed_forward(inputs[i])
             self.backward_propagation(targets[i], inputs[i])
 
-    def train_with_threads(self, inputs, targets, iterations=500000, n_threads=5):
-        threads = []
-        for i in range(n_threads):
-            thread = Thread(copy.copy(self), inputs, targets, iterations)
-            thread.start()
-            threads.append(thread)
-
-        for thread in threads:
-            thread.join()
-
-        weights = threads[0].weights
-        biases = threads[0].biases
-        for thread in threads[1:]:
-            for i in range(len(weights)):
-                weights[i] = np.add(weights[i], thread.weights[i])
-                biases[i] = np.add(biases[i], thread.biases[i])
-
-        for i in range(len(weights)):
-            weights[i] = weights[i] / n_threads
-            biases[i] = biases[i] / n_threads
-
-        self.weights = weights
-        self.biases = biases
-
     # Tests the neuronal network using the cost function. Prints out the results
     def test(self, inputs, target):
         loss = []
@@ -195,21 +162,18 @@ def d_cost(out, target):
     return np.subtract(target, out)
 
 
-nn = Main(layers=[2, 2, 1], activation_function=relu, d_activation_function=d_relu)
-inputs = [[0, 0], [1, 0], [0, 1], [1, 1]]
-targets = [[0], [1], [1], [0]]
-#with open("divorce.csv", "r") as file:
+nn = Main(layers=[2, 2, 1])
+nn_inputs = [[0, 0], [1, 0], [0, 1], [1, 1]]
+nn_targets = [[0], [1], [1], [0]]
+# with open("divorce.csv", "r") as file:
 #    data = file.read()
 #    for line in data.split("\n"):
 #        inputs.append(np.array(line.split(";")[:-1]).astype(np.double).tolist())
 #        targets.append(np.array(line.split(";")[-1]).astype(np.double).tolist())
 
 iteration = 1
-while nn.cost > .1:
-    _thread.start_new_thread(nn.train, (inputs, targets))
-    nn.train_with_threads(inputs, targets, 50000, 5)
-    nn.test(inputs, targets)
-    print(iteration)
-    iteration += 1
-
+nn.train(nn_inputs, nn_targets, 100000)
+nn.test(nn_inputs, nn_targets)
+print("Iteration", iteration)
+iteration += 1
 nn.save_nn("nn.json")
